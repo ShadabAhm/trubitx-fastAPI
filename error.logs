@@ -1,0 +1,11 @@
+web-1               | INFO:     192.168.65.1:38905 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | INFO:     192.168.65.1:38905 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | 2025-10-17 12:37:44,251 - app.services.pr_kpi_service - INFO - Fetched 120 articles for query: Apple
+web-1               | INFO:     192.168.65.1:49853 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | INFO:     192.168.65.1:64016 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | INFO:     192.168.65.1:46488 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | INFO:     192.168.65.1:46488 - "GET /api/v1/campaign/6/status HTTP/1.1" 200 OK
+web-1               | 2025-10-17 12:39:06,598 - app.services.pr_kpi_service - INFO - Fetched 144 articles for query: Samsung
+web-1               | 2025-10-17 12:39:06,610 - app.services.pr_kpi_service - INFO - Query 'Apple': 120 candidates -> 0 kept after matching
+web-1               | 2025-10-17 12:39:06,614 - app.services.pr_kpi_service - INFO - Query 'Samsung': 144 candidates -> 0 kept after matching
+web-1               | 2025-10-17 12:39:06,615 - app.services.pr_kpi_service - ERROR - Campaign execution failed: After filtering, no articles matched the provided keywords/phrases.

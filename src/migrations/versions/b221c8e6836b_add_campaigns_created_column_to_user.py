@@ -39,7 +39,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_user_subscription_user_id'), 'user_subscription', ['user_id'], unique=False)
     op.create_table('articles',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('campaign_id', sa.String(length=36), nullable=False),
+    sa.Column('campaign_id', sa.Integer(), nullable=False),
     sa.Column('engine', sa.String(length=50), nullable=False),
     sa.Column('market', sa.String(length=10), nullable=False),
     sa.Column('query', sa.Text(), nullable=False),
@@ -69,7 +69,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_articles_campaign_id'), 'articles', ['campaign_id'], unique=False)
     op.create_table('brand_kpis',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('campaign_id', sa.String(length=36), nullable=False),
+    sa.Column('campaign_id', sa.Integer(), nullable=False),
     sa.Column('brand', sa.String(length=255), nullable=False),
     sa.Column('mentions', sa.Integer(), nullable=False),
     sa.Column('weighted_reach', sa.Float(), nullable=False),
@@ -86,7 +86,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_brand_kpis_campaign_id'), 'brand_kpis', ['campaign_id'], unique=False)
     op.create_table('campaign_jobs',
     sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('campaign_id', sa.String(length=36), nullable=False),
+    sa.Column('campaign_id', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('progress', sa.Integer(), nullable=False),
     sa.Column('current_stage', sa.String(length=100), nullable=True),
@@ -100,7 +100,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_campaign_jobs_campaign_id'), 'campaign_jobs', ['campaign_id'], unique=True)
     op.create_table('generic_keyword_analyses',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('campaign_id', sa.String(length=36), nullable=False),
+    sa.Column('campaign_id', sa.Integer(), nullable=False),
     sa.Column('brand', sa.String(length=255), nullable=False),
     sa.Column('generic_keyword_mentions', sa.Integer(), nullable=False),
     sa.Column('positive_generic_mentions', sa.Integer(), nullable=False),
@@ -112,7 +112,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_generic_keyword_analyses_campaign_id'), 'generic_keyword_analyses', ['campaign_id'], unique=False)
     op.create_table('publication_kpis',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('campaign_id', sa.String(length=36), nullable=False),
+    sa.Column('campaign_id', sa.Integer(), nullable=False),
     sa.Column('domain', sa.String(length=255), nullable=False),
     sa.Column('mentions', sa.Integer(), nullable=False),
     sa.Column('weighted_reach', sa.Float(), nullable=False),
@@ -125,8 +125,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_publication_kpis_campaign_id'), 'publication_kpis', ['campaign_id'], unique=False)
-    op.drop_index(op.f('ix_token_blacklist_token'), table_name='token_blacklist')
-    op.drop_table('token_blacklist')
     op.add_column('campaigns', sa.Column('name', sa.String(length=255), nullable=False))
     op.add_column('campaigns', sa.Column('brand_keyword', sa.Text(), nullable=False))
     op.add_column('campaigns', sa.Column('current_step', sa.Integer(), nullable=False))
@@ -135,10 +133,11 @@ def upgrade() -> None:
     op.add_column('campaigns', sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
     op.add_column('campaigns', sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False))
     op.add_column('campaigns', sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True))
-    op.alter_column('campaigns', 'id',
-               existing_type=sa.INTEGER(),
-               type_=sa.String(length=36),
-               existing_nullable=False)
+    # Keep campaigns.id as INTEGER (not String) to match foreign keys
+    # op.alter_column('campaigns', 'id',
+    #            existing_type=sa.INTEGER(),
+    #            type_=sa.String(length=36),
+    #            existing_nullable=False)
     op.alter_column('campaigns', 'user_id',
                existing_type=sa.INTEGER(),
                nullable=False)
@@ -204,10 +203,11 @@ def downgrade() -> None:
     op.alter_column('campaigns', 'user_id',
                existing_type=sa.INTEGER(),
                nullable=True)
-    op.alter_column('campaigns', 'id',
-               existing_type=sa.String(length=36),
-               type_=sa.INTEGER(),
-               existing_nullable=False)
+    # Keep campaigns.id as INTEGER (not changing back from String)
+    # op.alter_column('campaigns', 'id',
+    #            existing_type=sa.String(length=36),
+    #            type_=sa.INTEGER(),
+    #            existing_nullable=False)
     op.drop_column('campaigns', 'completed_at')
     op.drop_column('campaigns', 'updated_at')
     op.drop_column('campaigns', 'created_at')
@@ -216,13 +216,6 @@ def downgrade() -> None:
     op.drop_column('campaigns', 'current_step')
     op.drop_column('campaigns', 'brand_keyword')
     op.drop_column('campaigns', 'name')
-    op.create_table('token_blacklist',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('token', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('expires_at', postgresql.TIMESTAMP(), autoincrement=False, nullable=False),
-    sa.PrimaryKeyConstraint('id', name=op.f('token_blacklist_pkey'))
-    )
-    op.create_index(op.f('ix_token_blacklist_token'), 'token_blacklist', ['token'], unique=True)
     op.drop_index(op.f('ix_publication_kpis_campaign_id'), table_name='publication_kpis')
     op.drop_table('publication_kpis')
     op.drop_index(op.f('ix_generic_keyword_analyses_campaign_id'), table_name='generic_keyword_analyses')

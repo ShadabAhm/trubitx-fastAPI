@@ -9,7 +9,6 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse, parse_qs, unquote
 from typing import List, Dict, Any, Optional, Tuple
-from uuid import UUID
 from datetime import UTC
 
 import aiohttp
@@ -26,7 +25,7 @@ from ..crud.crud_campaign import crud_campaign_job
 logger = logging.getLogger(__name__)
 
 class PRKPIService:
-    def __init__(self, db: AsyncSession, campaign_id: UUID):
+    def __init__(self, db: AsyncSession, campaign_id: int):
         self.db = db
         self.campaign_id = campaign_id
         self.campaign = None
@@ -494,7 +493,7 @@ class PRKPIService:
             from sqlalchemy import update
             await self.db.execute(
                 update(Campaign)
-                .where(Campaign.id == str(self.campaign_id))
+                .where(Campaign.id == self.campaign_id)
                 .values(status='completed', completed_at=datetime.now(UTC))
             )
             await self.db.commit()
@@ -588,7 +587,7 @@ class PRKPIService:
         
         for _, row in df.iterrows():
             article = Article(
-                campaign_id=str(self.campaign_id),
+                campaign_id=self.campaign_id,
                 engine=row.get('engine', ''),
                 market=row.get('market', ''),
                 query=row.get('query', ''),
@@ -645,7 +644,7 @@ class PRKPIService:
         kpis_to_create = []
         for _, kpi in kpis_df.iterrows():
             brand_kpi = BrandKPI(
-                campaign_id=str(self.campaign_id),
+                campaign_id=self.campaign_id,
                 brand=kpi['brand'],
                 mentions=kpi['mentions'],
                 weighted_reach=kpi['weighted_reach'],
@@ -670,7 +669,7 @@ class PRKPIService:
         kpis_to_create = []
         for _, kpi in kpis_df.iterrows():
             pub_kpi = PublicationKPI(
-                campaign_id=str(self.campaign_id),
+                campaign_id=self.campaign_id,
                 domain=kpi['domain'],
                 mentions=kpi['mentions'],
                 weighted_reach=kpi['weighted_reach'],
@@ -729,7 +728,7 @@ class PRKPIService:
         analysis_to_create = []
         for _, analysis in analysis_df.iterrows():
             generic_analysis = GenericKeywordAnalysis(
-                campaign_id=str(self.campaign_id),
+                campaign_id=self.campaign_id,
                 brand=analysis['brand'],
                 generic_keyword_mentions=analysis['generic_keyword_mentions'],
                 positive_generic_mentions=analysis['positive_generic_mentions'],
@@ -749,7 +748,7 @@ class PRKPIService:
         from sqlalchemy import update
         await self.db.execute(
             update(Campaign)
-            .where(Campaign.id == str(self.campaign_id))
+            .where(Campaign.id == self.campaign_id)
             .values(status='error', error_message=error_message)
         )
         await self.db.commit()

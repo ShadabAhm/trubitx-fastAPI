@@ -14,8 +14,12 @@ services:
     # expose:
     #   - "8000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     volumes:
       - ./src/app:/code/app
       - ./src/.env:/code/.env
@@ -28,8 +32,12 @@ services:
     env_file:
       - ./src/.env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     volumes:
       - ./src/app:/code/app
       - ./src/.env:/code/.env
@@ -45,6 +53,11 @@ services:
       - "5432"
     ports:
      - 5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:alpine
@@ -61,7 +74,8 @@ services:
     env_file:
       - ./src/.env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - ./src:/code/src
 
@@ -97,8 +111,10 @@ services:
     env_file:
       - ./src/.env
     depends_on:
-      - db
-      - web
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python -m src.scripts.create_first_superuser
     volumes:
       - ./src:/code/src
@@ -111,8 +127,10 @@ services:
     env_file:
       - ./src/.env
     depends_on:
-      - db
-      - web
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python -m src.scripts.create_first_tier
     volumes:
       - ./src:/code/src

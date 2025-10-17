@@ -1,5 +1,4 @@
 from typing import Annotated, Any, List
-from uuid import UUID
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -56,7 +55,7 @@ async def create_campaign(
     await subscription_service.increment_campaign_count(current_user["id"])
     
     # Start background processing
-    background_tasks.add_task(execute_campaign_background, db, created_campaign.id)
+    background_tasks.add_task(execute_campaign_background, created_campaign.id)
     
     return CampaignRead.model_validate(created_campaign)
 
@@ -72,10 +71,16 @@ async def read_campaigns(
     Get paginated list of user's campaigns
     """
     campaigns_data = await crud_campaign.get_user_campaigns(
-        db=db, 
+        db=db,
         user_id=current_user["id"],
-        offset=compute_offset(page, items_per_page), 
+        skip=compute_offset(page, items_per_page),
         limit=items_per_page
+    )
+
+    # Get total count for pagination
+    total_count = await crud_campaign.count_user_campaigns(
+        db=db,
+        user_id=current_user["id"]
     )
 
     # Enhance with job data
@@ -89,8 +94,8 @@ async def read_campaigns(
         enhanced_campaigns.append(campaign_dict)
 
     response: dict[str, Any] = paginated_response(
-        crud_data={"data": enhanced_campaigns, "total_count": len(enhanced_campaigns)}, 
-        page=page, 
+        crud_data={"data": enhanced_campaigns, "total_count": total_count},
+        page=page,
         items_per_page=items_per_page
     )
     return response
@@ -98,7 +103,7 @@ async def read_campaigns(
 
 @router.get("/campaign/{campaign_id}", response_model=CampaignWithJob)
 async def read_campaign(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> CampaignWithJob:
@@ -123,7 +128,7 @@ async def read_campaign(
 
 @router.get("/campaign/{campaign_id}/status", response_model=CampaignStatusResponse)
 async def get_campaign_status(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> CampaignStatusResponse:
@@ -155,7 +160,7 @@ async def get_campaign_status(
 
 @router.get("/campaign/{campaign_id}/results", response_model=CampaignResultsResponse)
 async def get_campaign_results(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> CampaignResultsResponse:
@@ -177,19 +182,19 @@ async def get_campaign_results(
     from ...models import Article, BrandKPI, PublicationKPI, GenericKeywordAnalysis
     
     # Brand KPIs
-    brand_kpis_result = await db.execute(select(BrandKPI).where(BrandKPI.campaign_id == str(campaign_id)))
+    brand_kpis_result = await db.execute(select(BrandKPI).where(BrandKPI.campaign_id == campaign.id))
     brand_kpis = brand_kpis_result.scalars().all()
-    
+
     # Publication KPIs
-    pub_kpis_result = await db.execute(select(PublicationKPI).where(PublicationKPI.campaign_id == str(campaign_id)))
+    pub_kpis_result = await db.execute(select(PublicationKPI).where(PublicationKPI.campaign_id == campaign.id))
     pub_kpis = pub_kpis_result.scalars().all()
-    
+
     # Articles
-    articles_result = await db.execute(select(Article).where(Article.campaign_id == str(campaign_id)))
+    articles_result = await db.execute(select(Article).where(Article.campaign_id == campaign.id))
     articles = articles_result.scalars().all()
-    
+
     # Generic Analysis
-    generic_analysis_result = await db.execute(select(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == str(campaign_id)))
+    generic_analysis_result = await db.execute(select(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == campaign.id))
     generic_analysis = generic_analysis_result.scalars().all()
     
     # Summary
@@ -215,7 +220,7 @@ async def get_campaign_results(
 
 @router.post("/campaign/{campaign_id}/pause")
 async def pause_campaign(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
@@ -243,7 +248,7 @@ async def pause_campaign(
 
 @router.post("/campaign/{campaign_id}/resume")
 async def resume_campaign(
-    campaign_id: UUID,
+    campaign_id: int,
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
@@ -268,14 +273,14 @@ async def resume_campaign(
     await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='in_progress')
     
     # Restart background processing from where it left off
-    background_tasks.add_task(resume_campaign_background, db, campaign_id)
+    background_tasks.add_task(resume_campaign_background, campaign_id)
     
     return {"message": "Campaign resumed successfully"}
 
 
 @router.post("/campaign/{campaign_id}/cancel")
 async def cancel_campaign(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
@@ -303,7 +308,7 @@ async def cancel_campaign(
 
 @router.delete("/campaign/{campaign_id}")
 async def delete_campaign(
-    campaign_id: UUID,
+    campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
@@ -339,7 +344,7 @@ async def get_campaign_limits(
 
 # ========== BACKGROUND TASK FUNCTIONS ==========
 
-async def execute_campaign_background(db: AsyncSession, campaign_id: UUID):
+async def execute_campaign_background(campaign_id: int):
     """Background task to execute campaign processing"""
     from ...core.db.database import async_get_db
     async for session in async_get_db():
@@ -351,7 +356,7 @@ async def execute_campaign_background(db: AsyncSession, campaign_id: UUID):
         break
 
 
-async def resume_campaign_background(db: AsyncSession, campaign_id: UUID):
+async def resume_campaign_background(campaign_id: int):
     """Background task to resume campaign processing"""
     from ...core.db.database import async_get_db
     async for session in async_get_db():

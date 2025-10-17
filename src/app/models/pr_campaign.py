@@ -7,11 +7,6 @@ from ..core.db.database import Base
 
 if TYPE_CHECKING:
     from .user import User
-    from .pr_campaign_job import CampaignJob
-    from .article import Article
-    from .brand_kpi import BrandKPI
-    from .publication_kpi import PublicationKPI
-    from .generic_keyword_analysis import GenericKeywordAnalysis
 
 
 class Campaign(Base):
@@ -63,7 +58,7 @@ class Article(Base):
     __tablename__ = "articles"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     
     engine: Mapped[str] = mapped_column(String(50))
     market: Mapped[str] = mapped_column(String(10))
@@ -98,7 +93,7 @@ class BrandKPI(Base):
     __tablename__ = "brand_kpis"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     brand: Mapped[str] = mapped_column(String(255))
     
     mentions: Mapped[int] = mapped_column(Integer)
@@ -119,7 +114,7 @@ class PublicationKPI(Base):
     __tablename__ = "publication_kpis"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     domain: Mapped[str] = mapped_column(String(255))
     
     mentions: Mapped[int] = mapped_column(Integer)
@@ -138,7 +133,7 @@ class GenericKeywordAnalysis(Base):
     __tablename__ = "generic_keyword_analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     brand: Mapped[str] = mapped_column(String(255))
     
     generic_keyword_mentions: Mapped[int] = mapped_column(Integer)

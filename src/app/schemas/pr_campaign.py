@@ -26,7 +26,7 @@ class CampaignUpdate(BaseModel):
 
 
 class CampaignRead(CampaignBase):
-    id: UUID
+    id: int
     user_id: int
     status: str
     current_step: int
@@ -34,7 +34,7 @@ class CampaignRead(CampaignBase):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -48,11 +48,11 @@ class CampaignJobBase(BaseModel):
 
 class CampaignJobRead(CampaignJobBase):
     id: UUID
-    campaign_id: UUID
+    campaign_id: int
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -73,7 +73,7 @@ class ArticleBase(BaseModel):
 
 class ArticleRead(ArticleBase):
     id: int
-    campaign_id: UUID
+    campaign_id: int
     title_key: Optional[str] = None
     row_id: Optional[str] = None
     sentiment: float
@@ -86,7 +86,7 @@ class ArticleRead(ArticleBase):
     is_aggregator: bool
     match_score: float
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -105,9 +105,9 @@ class BrandKPIBase(BaseModel):
 
 class BrandKPIRead(BrandKPIBase):
     id: int
-    campaign_id: UUID
+    campaign_id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -124,9 +124,9 @@ class PublicationKPIBase(BaseModel):
 
 class PublicationKPIRead(PublicationKPIBase):
     id: int
-    campaign_id: UUID
+    campaign_id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -140,9 +140,9 @@ class GenericKeywordAnalysisBase(BaseModel):
 
 class GenericKeywordAnalysisRead(GenericKeywordAnalysisBase):
     id: int
-    campaign_id: UUID
+    campaign_id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
