@@ -1,0 +1,384 @@
+from typing import Annotated, Any, List
+from uuid import UUID
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..dependencies import get_current_user, get_current_superuser
+from ...core.db.database import async_get_db
+from ...core.exceptions.http_exceptions import DuplicateValueException, NotFoundException, ForbiddenException
+from ...crud import crud_campaign, crud_campaign_job
+from ...schemas import (
+    CampaignCreate, CampaignRead, CampaignUpdate, CampaignWithJob, 
+    CampaignStatusResponse, CampaignResultsResponse, CampaignJobRead
+)
+from ...schemas.campaign_limits import CampaignLimitsResponse
+from ...services.pr_kpi_service import PRKPIService
+from ...services.subscription_service import SubscriptionService
+
+router = APIRouter(tags=["campaigns"])
+
+
+@router.post("/campaign", status_code=201)
+async def create_campaign(
+    campaign: CampaignCreate,
+    background_tasks: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignRead:
+    """
+    Create a new PR campaign and start background processing
+    """
+    # Validate tier limits
+    subscription_service = SubscriptionService(db)
+    
+    # Check if user can create campaign
+    if not await subscription_service.can_create_campaign(current_user["id"]):
+        limits = await subscription_service.get_user_limits(current_user["id"])
+        raise HTTPException(
+            status_code=400,
+            detail=f"Campaign limit reached. Your {limits['tier_name']} plan allows {limits['max_campaigns']} campaigns. You've used {limits['campaigns_created']}."
+        )
+    
+    # Validate campaign parameters against tier limits
+    campaign_data = campaign.model_dump()
+    await subscription_service.validate_campaign_creation(current_user["id"], campaign_data)
+    
+    # Create campaign
+    created_campaign = await crud_campaign.create(db=db, user_id=current_user["id"], campaign_in=campaign)
+    
+    # Create campaign job
+    await crud_campaign_job.create(db=db, campaign_id=created_campaign.id)
+    
+    # Increment campaign count
+    await subscription_service.increment_campaign_count(current_user["id"])
+    
+    # Start background processing
+    background_tasks.add_task(execute_campaign_background, db, created_campaign.id)
+    
+    return CampaignRead.model_validate(created_campaign)
+
+
+@router.get("/campaigns", response_model=PaginatedListResponse[CampaignWithJob])
+async def read_campaigns(
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    page: int = 1,
+    items_per_page: int = 10
+) -> dict:
+    """
+    Get paginated list of user's campaigns
+    """
+    campaigns_data = await crud_campaign.get_user_campaigns(
+        db=db, 
+        user_id=current_user["id"],
+        offset=compute_offset(page, items_per_page), 
+        limit=items_per_page
+    )
+
+    # Enhance with job data
+    enhanced_campaigns = []
+    for campaign in campaigns_data:
+        campaign_dict = CampaignRead.model_validate(campaign).model_dump()
+        if campaign.job:
+            campaign_dict["job_status"] = campaign.job.status
+            campaign_dict["job_progress"] = campaign.job.progress
+            campaign_dict["job_current_stage"] = campaign.job.current_stage
+        enhanced_campaigns.append(campaign_dict)
+
+    response: dict[str, Any] = paginated_response(
+        crud_data={"data": enhanced_campaigns, "total_count": len(enhanced_campaigns)}, 
+        page=page, 
+        items_per_page=items_per_page
+    )
+    return response
+
+
+@router.get("/campaign/{campaign_id}", response_model=CampaignWithJob)
+async def read_campaign(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignWithJob:
+    """
+    Get specific campaign details
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    campaign_dict = CampaignRead.model_validate(campaign).model_dump()
+    if campaign.job:
+        campaign_dict["job_status"] = campaign.job.status
+        campaign_dict["job_progress"] = campaign.job.progress
+        campaign_dict["job_current_stage"] = campaign.job.current_stage
+    
+    return CampaignWithJob.model_validate(campaign_dict)
+
+
+@router.get("/campaign/{campaign_id}/status", response_model=CampaignStatusResponse)
+async def get_campaign_status(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignStatusResponse:
+    """
+    Get campaign processing status and progress
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    job = await crud_campaign_job.get_by_campaign_id(db=db, campaign_id=campaign_id)
+    if job is None:
+        raise NotFoundException("Campaign job not found")
+    
+    estimated_time = estimate_time_remaining(job.progress)
+    
+    return CampaignStatusResponse(
+        campaign_status=campaign.status,
+        job_status=job.status,
+        progress=job.progress,
+        current_stage=job.current_stage,
+        error_message=campaign.error_message,
+        estimated_time_remaining=estimated_time
+    )
+
+
+@router.get("/campaign/{campaign_id}/results", response_model=CampaignResultsResponse)
+async def get_campaign_results(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignResultsResponse:
+    """
+    Get campaign results (only available when campaign is completed)
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    if campaign.status != 'completed':
+        raise HTTPException(status_code=400, detail="Campaign not completed yet")
+    
+    # Get all related data
+    from sqlalchemy import select
+    from ...models import Article, BrandKPI, PublicationKPI, GenericKeywordAnalysis
+    
+    # Brand KPIs
+    brand_kpis_result = await db.execute(select(BrandKPI).where(BrandKPI.campaign_id == str(campaign_id)))
+    brand_kpis = brand_kpis_result.scalars().all()
+    
+    # Publication KPIs
+    pub_kpis_result = await db.execute(select(PublicationKPI).where(PublicationKPI.campaign_id == str(campaign_id)))
+    pub_kpis = pub_kpis_result.scalars().all()
+    
+    # Articles
+    articles_result = await db.execute(select(Article).where(Article.campaign_id == str(campaign_id)))
+    articles = articles_result.scalars().all()
+    
+    # Generic Analysis
+    generic_analysis_result = await db.execute(select(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == str(campaign_id)))
+    generic_analysis = generic_analysis_result.scalars().all()
+    
+    # Summary
+    summary = {
+        'total_articles': len(articles),
+        'total_mentions': sum(kpi.mentions for kpi in brand_kpis),
+        'total_reach': sum(kpi.weighted_reach for kpi in brand_kpis),
+        'campaign_duration_days': campaign.duration_days,
+        'regions': campaign.regions,
+        'competitors_analyzed': len(campaign.competitors),
+        'campaign_name': campaign.name,
+        'created_at': campaign.created_at
+    }
+    
+    return CampaignResultsResponse(
+        brand_kpis=brand_kpis,
+        publication_kpis=pub_kpis,
+        articles=articles,
+        generic_analysis=generic_analysis,
+        summary=summary
+    )
+
+
+@router.post("/campaign/{campaign_id}/pause")
+async def pause_campaign(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, str]:
+    """
+    Pause a running campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    if campaign.status != 'in_progress':
+        raise HTTPException(status_code=400, detail="Only campaigns in progress can be paused")
+    
+    # Update campaign status
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='paused'))
+    
+    # Update job status
+    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='paused')
+    
+    return {"message": "Campaign paused successfully"}
+
+
+@router.post("/campaign/{campaign_id}/resume")
+async def resume_campaign(
+    campaign_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, str]:
+    """
+    Resume a paused campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    if campaign.status != 'paused':
+        raise HTTPException(status_code=400, detail="Only paused campaigns can be resumed")
+    
+    # Update campaign status
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='in_progress'))
+    
+    # Update job status
+    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='in_progress')
+    
+    # Restart background processing from where it left off
+    background_tasks.add_task(resume_campaign_background, db, campaign_id)
+    
+    return {"message": "Campaign resumed successfully"}
+
+
+@router.post("/campaign/{campaign_id}/cancel")
+async def cancel_campaign(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, str]:
+    """
+    Cancel a running or paused campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    if campaign.status not in ['in_progress', 'paused', 'draft']:
+        raise HTTPException(status_code=400, detail="Cannot cancel completed or errored campaign")
+    
+    # Update campaign status
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='cancelled'))
+    
+    # Update job status
+    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='cancelled')
+    
+    return {"message": "Campaign cancelled successfully"}
+
+
+@router.delete("/campaign/{campaign_id}")
+async def delete_campaign(
+    campaign_id: UUID,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, str]:
+    """
+    Soft delete a campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+    
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+    
+    success = await crud_campaign.delete(db=db, campaign_id=campaign_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete campaign")
+    
+    return {"message": "Campaign deleted successfully"}
+
+
+@router.get("/campaign/limits", response_model=CampaignLimitsResponse)
+async def get_campaign_limits(
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignLimitsResponse:
+    """
+    Get user's campaign limits based on their tier
+    """
+    subscription_service = SubscriptionService(db)
+    limits = await subscription_service.get_user_limits(current_user["id"])
+    return CampaignLimitsResponse(**limits)
+
+
+# ========== BACKGROUND TASK FUNCTIONS ==========
+
+async def execute_campaign_background(db: AsyncSession, campaign_id: UUID):
+    """Background task to execute campaign processing"""
+    from ...core.db.database import async_get_db
+    async for session in async_get_db():
+        try:
+            service = PRKPIService(session, campaign_id)
+            await service.execute_campaign()
+        except Exception as e:
+            print(f"Background campaign execution failed: {e}")
+        break
+
+
+async def resume_campaign_background(db: AsyncSession, campaign_id: UUID):
+    """Background task to resume campaign processing"""
+    from ...core.db.database import async_get_db
+    async for session in async_get_db():
+        try:
+            service = PRKPIService(session, campaign_id)
+            # You might want to implement resume logic in the service
+            await service.execute_campaign()  # For now, restart the campaign
+        except Exception as e:
+            print(f"Background campaign resumption failed: {e}")
+        break
+
+
+# ========== HELPER FUNCTIONS ==========
+
+def estimate_time_remaining(progress: int) -> str:
+    """Simple time estimation based on progress"""
+    if progress == 0:
+        return "Calculating..."
+    elif progress < 20:
+        return "15-20 minutes remaining"
+    elif progress < 40:
+        return "10-15 minutes remaining"
+    elif progress < 60:
+        return "8-12 minutes remaining"
+    elif progress < 80:
+        return "5-8 minutes remaining"
+    elif progress < 95:
+        return "2-5 minutes remaining"
+    else:
+        return "Almost complete"
