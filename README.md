@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <h1 align="center"> Benav Labs FastAPI boilerplate</h1>
 <p align="center" markdown=1>
   <i>Yet another template to speed your FastAPI development up.</i>
@@ -2156,3 +2157,6 @@ Benav Labs – [benav.io](https://benav.io)
 <a href="https://benav.io">
   <img src="https://github.com/benavlabs/fastcrud/raw/main/docs/assets/benav_labs_banner.png" alt="Powered by Benav Labs - benav.io"/>
 </a>
+=======
+# trubitx-fastAPI
+>>>>>>> ba2395318691fc0a18740a6f4eb342101ecc3799
