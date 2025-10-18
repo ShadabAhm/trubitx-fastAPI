@@ -27,7 +27,13 @@ class Campaign(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
+    # Recurring campaign fields
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    interval_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="campaigns")
     job: Mapped["CampaignJob"] = relationship("CampaignJob", back_populates="campaign", uselist=False)

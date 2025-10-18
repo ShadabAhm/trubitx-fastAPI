@@ -11,6 +11,8 @@ class CampaignBase(BaseModel):
     regions: List[str]
     duration_days: int = Field(default=14, ge=1, le=30)
     form_data: Dict[str, Any] = Field(default_factory=dict)
+    is_recurring: bool = False
+    interval_hours: Optional[int] = Field(default=None, ge=1, le=168)  # 1 hour to 7 days
 
 
 class CampaignCreate(CampaignBase):
@@ -23,6 +25,10 @@ class CampaignUpdate(BaseModel):
     current_step: Optional[int] = None
     form_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    is_recurring: Optional[bool] = None
+    interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
 
 
 class CampaignRead(CampaignBase):
@@ -34,6 +40,8 @@ class CampaignRead(CampaignBase):
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
