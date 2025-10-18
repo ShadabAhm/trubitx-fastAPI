@@ -69,6 +69,18 @@ class CRUDCampaign:
         return campaign
 
     async def delete(self, db: AsyncSession, campaign_id: int) -> bool:
+        # Delete related records first (cascade delete)
+        # Delete articles
+        await db.execute(delete(Article).where(Article.campaign_id == campaign_id))
+        # Delete brand KPIs
+        await db.execute(delete(BrandKPI).where(BrandKPI.campaign_id == campaign_id))
+        # Delete publication KPIs
+        await db.execute(delete(PublicationKPI).where(PublicationKPI.campaign_id == campaign_id))
+        # Delete generic keyword analyses
+        await db.execute(delete(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == campaign_id))
+        # Delete campaign job
+        await db.execute(delete(CampaignJob).where(CampaignJob.campaign_id == campaign_id))
+        # Finally delete the campaign
         result = await db.execute(delete(Campaign).where(Campaign.id == campaign_id))
         await db.commit()
         return result.rowcount > 0

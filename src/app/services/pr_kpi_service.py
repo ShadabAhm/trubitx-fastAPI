@@ -633,10 +633,10 @@ class PRKPIService:
 
     def compute_brand_kpis(self, df):
         """Compute brand-level KPIs"""
-        brand_map = {self.campaign.brand_keyword: "Client"}
-        for i, comp in enumerate(self.campaign.competitors):
-            brand_map[comp] = f"Competitor {chr(65+i)}"
-            
+        brand_map = {self.campaign.brand_keyword: self.campaign.brand_keyword}
+        for comp in self.campaign.competitors:
+            brand_map[comp] = comp
+
         return self.kpis_by_brand(df, brand_map)
 
     async def store_brand_kpis(self, kpis_df):
@@ -691,11 +691,11 @@ class PRKPIService:
             
         gk = self.normalize(generic_keyword)
         gk_pat = re.compile(rf"(?<!\w){re.escape(gk)}(?!\w)", re.IGNORECASE) if gk else None
-        
-        brand_map = {self.campaign.brand_keyword: "Client"}
-        for i, comp in enumerate(self.campaign.competitors):
-            brand_map[comp] = f"Competitor {chr(65+i)}"
-            
+
+        brand_map = {self.campaign.brand_keyword: self.campaign.brand_keyword}
+        for comp in self.campaign.competitors:
+            brand_map[comp] = comp
+
         stats = []
         tmp = df.copy()
         tmp["brand"] = tmp["query"].map(brand_map).fillna(tmp["query"])
