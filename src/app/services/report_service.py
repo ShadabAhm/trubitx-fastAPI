@@ -6,6 +6,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from weasyprint import HTML
+import io
 
 from ..models import Campaign, Article, BrandKPI, PublicationKPI, GenericKeywordAnalysis
 
@@ -19,8 +21,8 @@ class ReportService:
         self.campaign = None
         self.logo_path = Path(__file__).parent.parent.parent.parent / "logo.png"
 
-    async def generate_html_report(self) -> str:
-        """Generate HTML report from campaign data"""
+    async def generate_pdf_report(self) -> bytes:
+        """Generate PDF report from campaign data"""
 
         # Fetch campaign
         campaign_result = await self.db.execute(
@@ -59,7 +61,9 @@ class ReportService:
             articles_df=articles_df
         )
 
-        return html
+        # Convert HTML to PDF
+        pdf_bytes = HTML(string=html).write_pdf()
+        return pdf_bytes
 
     def _get_logo_base64(self) -> str:
         """Read logo and convert to base64"""

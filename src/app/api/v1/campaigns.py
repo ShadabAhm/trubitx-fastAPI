@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import Response
 from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -297,7 +297,7 @@ async def cancel_campaign(
     if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
         raise ForbiddenException("Not authorized to access this campaign")
     
-    if campaign.status not in ['in_progress', 'paused', 'draft']:
+    if campaign.status not in ['in_progress', 'paused', 'ingesting']:
         raise HTTPException(status_code=400, detail="Cannot cancel completed or errored campaign")
     
     # Update campaign status
@@ -459,14 +459,14 @@ async def get_campaign_runs(
     }
 
 
-@router.get("/campaign/{campaign_id}/report", response_class=HTMLResponse)
+@router.get("/campaign/{campaign_id}/report")
 async def download_campaign_report(
     campaign_id: int,
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
-) -> HTMLResponse:
+) -> Response:
     """
-    Generate and download HTML report for a completed campaign
+    Generate and download PDF report for a completed campaign
     """
     campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
     if campaign is None:
@@ -481,14 +481,15 @@ async def download_campaign_report(
             detail="Report only available for completed or active campaigns with data"
         )
 
-    # Generate HTML report
+    # Generate PDF report
     report_service = ReportService(db, campaign_id)
-    html_content = await report_service.generate_html_report()
+    pdf_bytes = await report_service.generate_pdf_report()
 
-    return HTMLResponse(
-        content=html_content,
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=campaign_{campaign_id}_report.html"
+            "Content-Disposition": f"attachment; filename=campaign_{campaign_id}_report.pdf"
         }
     )
 

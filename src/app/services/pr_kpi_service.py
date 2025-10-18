@@ -253,7 +253,7 @@ class PRKPIService:
         return re.compile(re.escape(term), re.IGNORECASE)
 
     def score_match(self, row, phrases, tokens, inc_terms, exc_terms,
-                    require_title=False, min_score=2.0, min_token_hits=1, strict_match=False):
+                    require_title=False, min_score=0.5, min_token_hits=1, strict_match=False):
         """Score article match based on keywords and phrases"""
         title = self.normalize(row.get("title", ""))
         summary = self.normalize(row.get("summary", ""))
@@ -586,7 +586,7 @@ class PRKPIService:
                 ok, s = self.score_match(
                     row, phrases, tokens, inc_terms, exc_terms,
                     require_title=form_data.get('require_title', False),
-                    min_score=form_data.get('min_score', 2.0),
+                    min_score=form_data.get('min_score', 0.5),
                     min_token_hits=form_data.get('min_token_hits', 2),
                     strict_match=form_data.get('strict_match', False)
                 )

@@ -19,7 +19,7 @@ class Campaign(Base):
     competitors: Mapped[list] = mapped_column(JSON)
     regions: Mapped[list] = mapped_column(JSON)
     duration_days: Mapped[int] = mapped_column(Integer, default=14)
-    status: Mapped[str] = mapped_column(String(20), default='draft')
+    status: Mapped[str] = mapped_column(String(20), default='ingesting')
     current_step: Mapped[int] = mapped_column(Integer, default=1)
     form_data: Mapped[dict] = mapped_column(JSON, default=dict)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

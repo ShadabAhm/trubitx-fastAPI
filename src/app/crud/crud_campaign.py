@@ -24,7 +24,11 @@ class CRUDCampaign:
         return campaign
 
     async def get_by_id(self, db: AsyncSession, campaign_id: int) -> Optional[Campaign]:
-        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+        result = await db.execute(
+            select(Campaign)
+            .options(selectinload(Campaign.job))
+            .where(Campaign.id == campaign_id)
+        )
         return result.scalar_one_or_none()
 
     async def get_user_campaigns(
