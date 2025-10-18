@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import HTMLResponse, FileResponse
 from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from ...schemas import (
 from ...schemas.campaign_limits import CampaignLimitsResponse
 from ...services.pr_kpi_service import PRKPIService
 from ...services.subscription_service import SubscriptionService
+from ...services.report_service import ReportService
 
 router = APIRouter(tags=["campaigns"])
 
@@ -455,6 +457,40 @@ async def get_campaign_runs(
         "created_at": campaign.created_at,
         "status": campaign.status
     }
+
+
+@router.get("/campaign/{campaign_id}/report", response_class=HTMLResponse)
+async def download_campaign_report(
+    campaign_id: int,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> HTMLResponse:
+    """
+    Generate and download HTML report for a completed campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+
+    if campaign.status != 'completed' and campaign.status != 'active':
+        raise HTTPException(
+            status_code=400,
+            detail="Report only available for completed or active campaigns with data"
+        )
+
+    # Generate HTML report
+    report_service = ReportService(db, campaign_id)
+    html_content = await report_service.generate_html_report()
+
+    return HTMLResponse(
+        content=html_content,
+        headers={
+            "Content-Disposition": f"attachment; filename=campaign_{campaign_id}_report.html"
+        }
+    )
 
 
 # ========== BACKGROUND TASK FUNCTIONS ==========

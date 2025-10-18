@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 from datetime import UTC, datetime
 
@@ -35,6 +36,7 @@ class CRUDCampaign:
     ) -> List[Campaign]:
         result = await db.execute(
             select(Campaign)
+            .options(selectinload(Campaign.job))
             .where(Campaign.user_id == user_id)
             .offset(skip)
             .limit(limit)
