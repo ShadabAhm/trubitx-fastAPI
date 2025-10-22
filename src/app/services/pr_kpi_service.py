@@ -253,7 +253,7 @@ class PRKPIService:
         return re.compile(re.escape(term), re.IGNORECASE)
 
     def score_match(self, row, phrases, tokens, inc_terms, exc_terms,
-                    require_title=False, min_score=2.0, min_token_hits=1, strict_match=False):
+                    require_title=False, min_score=0.5, min_token_hits=1, strict_match=False):
         """Score article match based on keywords and phrases"""
         title = self.normalize(row.get("title", ""))
         summary = self.normalize(row.get("summary", ""))
@@ -472,8 +472,11 @@ class PRKPIService:
             
             # Step 1: Data Collection
             await self.update_job_progress(20, "Fetching news articles")
-            all_articles = await self.fetch_campaign_articles()
-            
+
+            # For recurring campaigns, fetch only new articles since last run
+            from_date = self.campaign.last_run_at if self.campaign.is_recurring else None
+            all_articles = await self.fetch_campaign_articles(from_date=from_date)
+
             if not all_articles:
                 raise Exception("No articles found for the given criteria")
             
@@ -488,16 +491,30 @@ class PRKPIService:
             # Step 4: Finalize campaign
             await self.update_job_progress(100, "Completed")
             await crud_campaign_job.update_status(self.db, self.campaign_id, 'completed')
-            
+
             # Update campaign status
             from sqlalchemy import update
+            from datetime import timedelta
+
+            now = datetime.now(UTC)
+            update_values = {'last_run_at': now}
+
+            # For recurring campaigns, keep status as 'active' and set next run
+            if self.campaign.is_recurring and self.campaign.interval_hours:
+                update_values['status'] = 'active'
+                update_values['next_run_at'] = now + timedelta(hours=self.campaign.interval_hours)
+            else:
+                # For non-recurring campaigns, mark as completed
+                update_values['status'] = 'completed'
+                update_values['completed_at'] = now
+
             await self.db.execute(
                 update(Campaign)
                 .where(Campaign.id == self.campaign_id)
-                .values(status='completed', completed_at=datetime.now(UTC))
+                .values(**update_values)
             )
             await self.db.commit()
-            
+
             return True
 
         except Exception as e:
@@ -505,21 +522,42 @@ class PRKPIService:
             await self.handle_campaign_error(str(e))
             return False
     
-    async def fetch_campaign_articles(self):
-        """Fetch articles for all campaign queries"""
+    async def fetch_campaign_articles(self, from_date=None):
+        """Fetch articles for all campaign queries
+
+        Args:
+            from_date: Optional datetime to fetch articles published after this date.
+                      If None, uses campaign.duration_days from now.
+        """
         all_articles = []
         queries = [self.campaign.brand_keyword] + self.campaign.competitors
-        
+
+        # Calculate days based on from_date for incremental fetching
+        if from_date:
+            from datetime import datetime, UTC
+            days_diff = (datetime.now(UTC) - from_date).days
+            days_to_fetch = max(1, days_diff)  # At least 1 day
+        else:
+            days_to_fetch = self.campaign.duration_days
+
         for query in queries:
             articles = await self.fetch_news_async(
                 query=query,
-                days=self.campaign.duration_days,
+                days=days_to_fetch,
                 max_items=60,
                 markets=self.campaign.regions
             )
+
+            # Filter articles by from_date if provided (for incremental runs)
+            if from_date:
+                articles = [
+                    article for article in articles
+                    if article.get('published_at') and article['published_at'] > from_date
+                ]
+
             all_articles.extend(articles)
             logger.info(f"Fetched {len(articles)} articles for query: {query}")
-            
+
         return all_articles
 
     async def process_articles(self, articles):
@@ -548,7 +586,7 @@ class PRKPIService:
                 ok, s = self.score_match(
                     row, phrases, tokens, inc_terms, exc_terms,
                     require_title=form_data.get('require_title', False),
-                    min_score=form_data.get('min_score', 2.0),
+                    min_score=form_data.get('min_score', 0.5),
                     min_token_hits=form_data.get('min_token_hits', 2),
                     strict_match=form_data.get('strict_match', False)
                 )
@@ -633,10 +671,10 @@ class PRKPIService:
 
     def compute_brand_kpis(self, df):
         """Compute brand-level KPIs"""
-        brand_map = {self.campaign.brand_keyword: "Client"}
-        for i, comp in enumerate(self.campaign.competitors):
-            brand_map[comp] = f"Competitor {chr(65+i)}"
-            
+        brand_map = {self.campaign.brand_keyword: self.campaign.brand_keyword}
+        for comp in self.campaign.competitors:
+            brand_map[comp] = comp
+
         return self.kpis_by_brand(df, brand_map)
 
     async def store_brand_kpis(self, kpis_df):
@@ -691,11 +729,11 @@ class PRKPIService:
             
         gk = self.normalize(generic_keyword)
         gk_pat = re.compile(rf"(?<!\w){re.escape(gk)}(?!\w)", re.IGNORECASE) if gk else None
-        
-        brand_map = {self.campaign.brand_keyword: "Client"}
-        for i, comp in enumerate(self.campaign.competitors):
-            brand_map[comp] = f"Competitor {chr(65+i)}"
-            
+
+        brand_map = {self.campaign.brand_keyword: self.campaign.brand_keyword}
+        for comp in self.campaign.competitors:
+            brand_map[comp] = comp
+
         stats = []
         tmp = df.copy()
         tmp["brand"] = tmp["query"].map(brand_map).fillna(tmp["query"])

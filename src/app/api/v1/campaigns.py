@@ -1,7 +1,9 @@
 from typing import Annotated, Any, List
 import asyncio
+from datetime import datetime, UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import Response
 from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,12 +12,13 @@ from ...core.db.database import async_get_db
 from ...core.exceptions.http_exceptions import DuplicateValueException, NotFoundException, ForbiddenException
 from ...crud import crud_campaign, crud_campaign_job
 from ...schemas import (
-    CampaignCreate, CampaignRead, CampaignUpdate, CampaignWithJob, 
+    CampaignCreate, CampaignRead, CampaignUpdate, CampaignWithJob,
     CampaignStatusResponse, CampaignResultsResponse, CampaignJobRead
 )
 from ...schemas.campaign_limits import CampaignLimitsResponse
 from ...services.pr_kpi_service import PRKPIService
 from ...services.subscription_service import SubscriptionService
+from ...services.report_service import ReportService
 
 router = APIRouter(tags=["campaigns"])
 
@@ -294,7 +297,7 @@ async def cancel_campaign(
     if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
         raise ForbiddenException("Not authorized to access this campaign")
     
-    if campaign.status not in ['in_progress', 'paused', 'draft']:
+    if campaign.status not in ['in_progress', 'paused', 'ingesting']:
         raise HTTPException(status_code=400, detail="Cannot cancel completed or errored campaign")
     
     # Update campaign status
@@ -340,6 +343,155 @@ async def get_campaign_limits(
     subscription_service = SubscriptionService(db)
     limits = await subscription_service.get_user_limits(current_user["id"])
     return CampaignLimitsResponse(**limits)
+
+
+@router.post("/campaign/{campaign_id}/toggle-recurring")
+async def toggle_recurring(
+    campaign_id: int,
+    interval_hours: int,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, Any]:
+    """
+    Toggle recurring mode for a campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+
+    # Validate interval_hours
+    if interval_hours < 1 or interval_hours > 168:
+        raise HTTPException(status_code=400, detail="Interval must be between 1 and 168 hours")
+
+    # Toggle recurring
+    new_recurring_state = not campaign.is_recurring
+    update_data = {
+        "is_recurring": new_recurring_state,
+        "interval_hours": interval_hours if new_recurring_state else None
+    }
+
+    # Set next_run_at if enabling recurring
+    if new_recurring_state:
+        update_data["next_run_at"] = datetime.now(UTC) + timedelta(hours=interval_hours)
+        update_data["status"] = "active"
+    else:
+        update_data["next_run_at"] = None
+
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(**update_data))
+
+    return {
+        "message": f"Recurring mode {'enabled' if new_recurring_state else 'disabled'}",
+        "is_recurring": new_recurring_state,
+        "interval_hours": interval_hours if new_recurring_state else None,
+        "next_run_at": update_data.get("next_run_at")
+    }
+
+
+@router.put("/campaign/{campaign_id}/interval")
+async def update_interval(
+    campaign_id: int,
+    interval_hours: int,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, Any]:
+    """
+    Update the interval hours for a recurring campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+
+    if not campaign.is_recurring:
+        raise HTTPException(status_code=400, detail="Campaign is not set to recurring mode")
+
+    # Validate interval_hours
+    if interval_hours < 1 or interval_hours > 168:
+        raise HTTPException(status_code=400, detail="Interval must be between 1 and 168 hours")
+
+    # Update interval and recalculate next_run_at
+    base_time = campaign.last_run_at if campaign.last_run_at else datetime.now(UTC)
+    next_run_at = base_time + timedelta(hours=interval_hours)
+
+    await crud_campaign.update(
+        db=db,
+        campaign_id=campaign_id,
+        campaign_in=CampaignUpdate(interval_hours=interval_hours, next_run_at=next_run_at)
+    )
+
+    return {
+        "message": "Interval updated successfully",
+        "interval_hours": interval_hours,
+        "next_run_at": next_run_at
+    }
+
+
+@router.get("/campaign/{campaign_id}/runs")
+async def get_campaign_runs(
+    campaign_id: int,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> dict[str, Any]:
+    """
+    Get run history and schedule for a campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+
+    return {
+        "campaign_id": campaign.id,
+        "campaign_name": campaign.name,
+        "is_recurring": campaign.is_recurring,
+        "interval_hours": campaign.interval_hours,
+        "last_run_at": campaign.last_run_at,
+        "next_run_at": campaign.next_run_at,
+        "created_at": campaign.created_at,
+        "status": campaign.status
+    }
+
+
+@router.get("/campaign/{campaign_id}/report")
+async def download_campaign_report(
+    campaign_id: int,
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> Response:
+    """
+    Generate and download PDF report for a completed campaign
+    """
+    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
+    if campaign is None:
+        raise NotFoundException("Campaign not found")
+
+    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
+        raise ForbiddenException("Not authorized to access this campaign")
+
+    if campaign.status != 'completed' and campaign.status != 'active':
+        raise HTTPException(
+            status_code=400,
+            detail="Report only available for completed or active campaigns with data"
+        )
+
+    # Generate PDF report
+    report_service = ReportService(db, campaign_id)
+    pdf_bytes = await report_service.generate_pdf_report()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=campaign_{campaign_id}_report.pdf"
+        }
+    )
 
 
 # ========== BACKGROUND TASK FUNCTIONS ==========

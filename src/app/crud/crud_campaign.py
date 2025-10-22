@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 from datetime import UTC, datetime
 
@@ -23,7 +24,11 @@ class CRUDCampaign:
         return campaign
 
     async def get_by_id(self, db: AsyncSession, campaign_id: int) -> Optional[Campaign]:
-        result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+        result = await db.execute(
+            select(Campaign)
+            .options(selectinload(Campaign.job))
+            .where(Campaign.id == campaign_id)
+        )
         return result.scalar_one_or_none()
 
     async def get_user_campaigns(
@@ -35,6 +40,7 @@ class CRUDCampaign:
     ) -> List[Campaign]:
         result = await db.execute(
             select(Campaign)
+            .options(selectinload(Campaign.job))
             .where(Campaign.user_id == user_id)
             .offset(skip)
             .limit(limit)
@@ -69,6 +75,18 @@ class CRUDCampaign:
         return campaign
 
     async def delete(self, db: AsyncSession, campaign_id: int) -> bool:
+        # Delete related records first (cascade delete)
+        # Delete articles
+        await db.execute(delete(Article).where(Article.campaign_id == campaign_id))
+        # Delete brand KPIs
+        await db.execute(delete(BrandKPI).where(BrandKPI.campaign_id == campaign_id))
+        # Delete publication KPIs
+        await db.execute(delete(PublicationKPI).where(PublicationKPI.campaign_id == campaign_id))
+        # Delete generic keyword analyses
+        await db.execute(delete(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == campaign_id))
+        # Delete campaign job
+        await db.execute(delete(CampaignJob).where(CampaignJob.campaign_id == campaign_id))
+        # Finally delete the campaign
         result = await db.execute(delete(Campaign).where(Campaign.id == campaign_id))
         await db.commit()
         return result.rowcount > 0
