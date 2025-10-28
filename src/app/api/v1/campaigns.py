@@ -19,6 +19,8 @@ from ...schemas.campaign_limits import CampaignLimitsResponse
 from ...services.pr_kpi_service import PRKPIService
 from ...services.subscription_service import SubscriptionService
 from ...services.report_service import ReportService
+from ...core.scheduler import pause_campaign_job, resume_campaign_job
+
 
 router = APIRouter(tags=["campaigns"])
 
@@ -41,7 +43,8 @@ async def create_campaign(
         limits = await subscription_service.get_user_limits(current_user["id"])
         raise HTTPException(
             status_code=400,
-            detail=f"Campaign limit reached. Your {limits['tier_name']} plan allows {limits['max_campaigns']} campaigns. You've used {limits['campaigns_created']}."
+            detail=f"Campaign limit reached. Your {limits['tier_name']} plan allows "
+                   f"{limits['max_campaigns']} campaigns. You've used {limits['campaigns_created']}."
         )
     
     # Validate campaign parameters against tier limits
@@ -50,17 +53,33 @@ async def create_campaign(
     
     # Create campaign
     created_campaign = await crud_campaign.create(db=db, user_id=current_user["id"], campaign_in=campaign)
-    
+
+    # ✅ Automatically set as recurring
+    next_run_time = datetime.now(UTC) + timedelta(hours=24)
+    update_data = {
+        "status": "active",
+        "is_recurring": True,
+        "interval_hours": 24,
+        "next_run_at": next_run_time,
+    }
+    await crud_campaign.update(db=db, campaign_id=created_campaign.id, campaign_in=CampaignUpdate(**update_data))
+
     # Create campaign job
     await crud_campaign_job.create(db=db, campaign_id=created_campaign.id)
     
     # Increment campaign count
     await subscription_service.increment_campaign_count(current_user["id"])
     
-    # Start background processing
+    # ✅ Schedule the first recurring job in the background
+    resume_campaign_job(created_campaign.id, interval_hours=24)
+    
+    # ✅ Start background execution immediately
     background_tasks.add_task(execute_campaign_background, created_campaign.id)
     
+    print(f"Campaign {created_campaign.id} created as recurring (next run at {next_run_time})")
+
     return CampaignRead.model_validate(created_campaign)
+
 
 
 @router.get("/campaigns", response_model=PaginatedListResponse[CampaignWithJob])
@@ -227,26 +246,24 @@ async def pause_campaign(
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
-    """
-    Pause a running campaign
-    """
     campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
-    if campaign is None:
-        raise NotFoundException("Campaign not found")
-    
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
     if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
-        raise ForbiddenException("Not authorized to access this campaign")
-    
-    if campaign.status != 'in_progress':
-        raise HTTPException(status_code=400, detail="Only campaigns in progress can be paused")
-    
-    # Update campaign status
-    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='paused'))
-    
-    # Update job status
-    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='paused')
-    
-    return {"message": "Campaign paused successfully"}
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if campaign.status not in ["active", "in_progress"]:
+        raise HTTPException(status_code=400, detail="Only active campaigns can be paused")
+
+    update_data = {"status": "paused", "is_recurring": False, "next_run_at": None}
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(**update_data))
+    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status="paused")
+
+    # Pause the scheduler job
+    pause_campaign_job(campaign_id)
+
+    return {"message": "Campaign paused successfully. Automatic analytics stopped."}
 
 
 @router.post("/campaign/{campaign_id}/resume")
@@ -256,29 +273,36 @@ async def resume_campaign(
     db: Annotated[AsyncSession, Depends(async_get_db)],
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
-    """
-    Resume a paused campaign
-    """
     campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
-    if campaign is None:
-        raise NotFoundException("Campaign not found")
-    
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
     if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
-        raise ForbiddenException("Not authorized to access this campaign")
-    
-    if campaign.status != 'paused':
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if campaign.status != "paused":
         raise HTTPException(status_code=400, detail="Only paused campaigns can be resumed")
-    
-    # Update campaign status
-    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='in_progress'))
-    
-    # Update job status
-    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='in_progress')
-    
-    # Restart background processing from where it left off
-    background_tasks.add_task(resume_campaign_background, campaign_id)
-    
-    return {"message": "Campaign resumed successfully"}
+
+    next_run_time = datetime.now(UTC) + timedelta(hours=24)
+    update_data = {
+        "status": "active",
+        "is_recurring": True,
+        "interval_hours": 24,
+        "next_run_at": next_run_time,
+    }
+
+    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(**update_data))
+    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status="in_progress")
+
+    # Resume the scheduler job
+    resume_campaign_job(campaign_id, interval_hours=24)
+
+    background_tasks.add_task(execute_campaign_background, campaign_id)
+
+    return {
+        "message": "Campaign resumed successfully. Automatic analytics re-enabled.",
+        "next_run_at": next_run_time,
+    }
 
 
 @router.post("/campaign/{campaign_id}/cancel")

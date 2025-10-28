@@ -37,11 +37,12 @@ dependencies = [
     "feedparser>=6.0.0",
     "pandas>=2.0.0",
     "plotly>=5.0.0",
-    "weasyprint>=60.0",
     "tldextract>=5.0.0",
     "python-dateutil>=2.8.0",
     "vaderSentiment>=3.3.0",
-    "trafilatura>=1.6.0"
+    "trafilatura>=1.6.0",
+    "weasyprint>=60.0",
+    "apscheduler"
 ]
 
 [project.optional-dependencies]

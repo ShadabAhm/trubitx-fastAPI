@@ -1,12 +1,13 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-
+import asyncio
 from fastapi import FastAPI
 
 from .admin.initialize import create_admin_interface
 from .api import router
 from .core.config import settings
 from .core.setup import create_application, lifespan_factory
+from .core.scheduler import start_scheduler
 
 admin = create_admin_interface()
 
@@ -23,6 +24,10 @@ async def lifespan_with_admin(app: FastAPI) -> AsyncGenerator[None, None]:
         if admin:
             # Initialize admin database and setup
             await admin.initialize()
+
+            @app.on_event("startup")
+            async def startup_event():
+                start_scheduler()
 
         yield
 
