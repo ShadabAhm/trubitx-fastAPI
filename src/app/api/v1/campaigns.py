@@ -248,66 +248,6 @@ async def get_campaign_results(
     )
 
 
-@router.post("/campaign/{campaign_id}/pause")
-async def pause_campaign(
-    campaign_id: int,
-    db: Annotated[AsyncSession, Depends(async_get_db)],
-    current_user: Annotated[dict, Depends(get_current_user)]
-) -> dict[str, str]:
-    """
-    Pause a running campaign
-    """
-    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
-    if campaign is None:
-        raise NotFoundException("Campaign not found")
-    
-    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
-        raise ForbiddenException("Not authorized to access this campaign")
-    
-    if campaign.status != 'in_progress':
-        raise HTTPException(status_code=400, detail="Only campaigns in progress can be paused")
-    
-    # Update campaign status
-    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='paused'))
-    
-    # Update job status
-    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='paused')
-    
-    return {"message": "Campaign paused successfully"}
-
-
-@router.post("/campaign/{campaign_id}/resume")
-async def resume_campaign(
-    campaign_id: int,
-    background_tasks: BackgroundTasks,
-    db: Annotated[AsyncSession, Depends(async_get_db)],
-    current_user: Annotated[dict, Depends(get_current_user)]
-) -> dict[str, str]:
-    """
-    Resume a paused campaign
-    """
-    campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
-    if campaign is None:
-        raise NotFoundException("Campaign not found")
-    
-    if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
-        raise ForbiddenException("Not authorized to access this campaign")
-    
-    if campaign.status != 'paused':
-        raise HTTPException(status_code=400, detail="Only paused campaigns can be resumed")
-    
-    # Update campaign status
-    await crud_campaign.update(db=db, campaign_id=campaign_id, campaign_in=CampaignUpdate(status='in_progress'))
-    
-    # Update job status
-    await crud_campaign_job.update_status(db=db, campaign_id=campaign_id, status='in_progress')
-    
-    # Restart background processing from where it left off
-    background_tasks.add_task(resume_campaign_background, campaign_id)
-    
-    return {"message": "Campaign resumed successfully"}
-
-
 @router.post("/campaign/{campaign_id}/cancel")
 async def cancel_campaign(
     campaign_id: int,
