@@ -7,7 +7,7 @@ from .admin.initialize import create_admin_interface
 from .api import router
 from .core.config import settings
 from .core.setup import create_application, lifespan_factory
-from .core.scheduler import start_scheduler
+# from .core.scheduler import start_scheduler
 
 admin = create_admin_interface()
 
@@ -25,9 +25,9 @@ async def lifespan_with_admin(app: FastAPI) -> AsyncGenerator[None, None]:
             # Initialize admin database and setup
             await admin.initialize()
 
-            @app.on_event("startup")
-            async def startup_event():
-                start_scheduler()
+            # @app.on_event("startup")
+            # async def startup_event():
+            #     start_scheduler()
 
         yield
 

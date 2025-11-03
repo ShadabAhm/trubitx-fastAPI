@@ -6,3 +6,4 @@ from .user_subscription import UserSubscription
 from .pr_campaign import (
     Campaign, CampaignJob, Article, BrandKPI, PublicationKPI, GenericKeywordAnalysis
 )
+from .payment import Payment

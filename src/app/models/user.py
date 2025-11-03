@@ -44,4 +44,6 @@ class User(Base):
     campaigns: Mapped[list] = relationship("Campaign", back_populates="user")
     tier: Mapped["Tier"] = relationship("Tier", back_populates="users")
     subscriptions: Mapped[list] = relationship("UserSubscription", back_populates="user")
+    payments: Mapped[list] = relationship("Payment", back_populates="user")
+
 

@@ -9,6 +9,8 @@ from .tiers import router as tiers_router
 from .users import router as users_router
 from .campaigns import router as campaigns_router
 from .forgot_password import router as forgot_password_router
+from .payment import router as payment_router
+
 
 router = APIRouter(prefix="/v1")
 router.include_router(login_router)
@@ -20,3 +22,5 @@ router.include_router(tiers_router)
 router.include_router(rate_limits_router)
 router.include_router(forgot_password_router)
 router.include_router(campaigns_router)
+router.include_router(payment_router)
+

@@ -42,7 +42,8 @@ dependencies = [
     "vaderSentiment>=3.3.0",
     "trafilatura>=1.6.0",
     "weasyprint>=60.0",
-    "apscheduler"
+    "apscheduler",
+    "razorpay"
 ]
 
 [project.optional-dependencies]
