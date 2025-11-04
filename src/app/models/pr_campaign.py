@@ -23,7 +23,6 @@ class Campaign(Base):
     current_step: Mapped[int] = mapped_column(Integer, default=1)
     form_data: Mapped[dict] = mapped_column(JSON, default=dict)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -55,7 +54,6 @@ class CampaignJob(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    
     # Relationships
     campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="job")
 
@@ -77,7 +75,6 @@ class Article(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     rank_in_feed: Mapped[int] = mapped_column(Integer)
     body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
     title_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     row_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     sentiment: Mapped[float] = mapped_column(Float, default=0.0)
@@ -89,9 +86,7 @@ class Article(Base):
     tier: Mapped[str] = mapped_column(String(20), default='tier2')
     is_aggregator: Mapped[bool] = mapped_column(Boolean, default=False)
     match_score: Mapped[float] = mapped_column(Float, default=0.0)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    
     campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="articles")
 
 
@@ -101,7 +96,6 @@ class BrandKPI(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     brand: Mapped[str] = mapped_column(String(255))
-    
     mentions: Mapped[int] = mapped_column(Integer)
     weighted_reach: Mapped[float] = mapped_column(Float)
     avg_sentiment: Mapped[float] = mapped_column(Float)
@@ -110,9 +104,7 @@ class BrandKPI(Base):
     inferred_clicks: Mapped[float] = mapped_column(Float)
     share_of_voice: Mapped[float] = mapped_column(Float)
     ad_equivalent_value_inr: Mapped[float] = mapped_column(Float)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    
     campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="brand_kpis")
 
 
@@ -122,16 +114,13 @@ class PublicationKPI(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     domain: Mapped[str] = mapped_column(String(255))
-    
     mentions: Mapped[int] = mapped_column(Integer)
     weighted_reach: Mapped[float] = mapped_column(Float)
     avg_engagement_rate: Mapped[float] = mapped_column(Float)
     avg_sentiment: Mapped[float] = mapped_column(Float)
     tier: Mapped[str] = mapped_column(String(20))
     is_aggregator: Mapped[bool] = mapped_column(Boolean, default=False)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    
     campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="publication_kpis")
 
 
@@ -141,11 +130,8 @@ class GenericKeywordAnalysis(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     campaign_id: Mapped[int] = mapped_column(Integer, ForeignKey("campaigns.id"), index=True)
     brand: Mapped[str] = mapped_column(String(255))
-    
     generic_keyword_mentions: Mapped[int] = mapped_column(Integer)
     positive_generic_mentions: Mapped[int] = mapped_column(Integer)
     positive_rate: Mapped[float] = mapped_column(Float)
-    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
-    
     campaign: Mapped["Campaign"] = relationship("Campaign", back_populates="generic_analyses")

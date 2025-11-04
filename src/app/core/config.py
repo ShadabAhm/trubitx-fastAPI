@@ -127,6 +127,16 @@ class EnvironmentSettings(BaseSettings):
     ENVIRONMENT: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
 
 
+class SMTPSettings(BaseSettings):
+    SMTP_SERVER: str = config("SMTP_SERVER", default="smtp.gmail.com")
+    SMTP_PORT: int = config("SMTP_PORT", default=587)
+    SMTP_USERNAME: str = config("SMTP_USERNAME", default=None)
+    SMTP_PASSWORD: str = config("SMTP_PASSWORD", default=None)
+    FROM_EMAIL: str = config("FROM_EMAIL", default=None)
+    FRONTEND_URL: str = config("FRONTEND_URL", default="http://localhost:5173")
+
+
+
 class Settings(
     AppSettings,
     SQLiteSettings,
@@ -141,6 +151,7 @@ class Settings(
     DefaultRateLimitSettings,
     CRUDAdminSettings,
     EnvironmentSettings,
+    SMTPSettings,
 ):
     pass
 

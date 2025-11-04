@@ -20,7 +20,7 @@ from ...core.security import (
 router = APIRouter(tags=["Login"])
 
 
-# ✅ Accepts JSON instead of form data
+# Accepts JSON instead of form data
 class LoginInput(BaseModel):
     username_or_email: str
     password: str
@@ -51,7 +51,7 @@ async def login_for_access_token(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=False,  # ✅ Keep False for local dev, change to True in production
+        secure=False,  # Keep False for local dev, change to True in production
         samesite="lax",
         path="/",
         max_age=max_age,

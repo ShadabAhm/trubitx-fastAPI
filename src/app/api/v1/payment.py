@@ -11,8 +11,8 @@ from ..dependencies import get_current_user
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
-RAZORPAY_KEY_ID = "rzp_test_xxxxx"
-RAZORPAY_KEY_SECRET = "xxxxx"
+RAZORPAY_KEY_ID = "rzp_test_Rbc8mXXdwuWUOS"
+RAZORPAY_KEY_SECRET = "rvsE94QNaiDh4ttPHtUuyb4y"
 
 razor_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
@@ -32,16 +32,29 @@ async def create_order(
     current_user=Depends(get_current_user),
 ):
     try:
-        # Create order via Razorpay API
+        # Handle free plan separately
+        if data.amount == 0:
+            payment = Payment(
+                user_id=current_user["id"],
+                plan_name=data.plan_name,
+                amount=data.amount,
+                order_id="free_plan",
+                status="free",
+            )
+            db.add(payment)
+            await db.commit()
+            await db.refresh(payment)
+            return {"message": "Free plan activated successfully", "status": "free"}
+
+        # Otherwise, create Razorpay order
         order = razor_client.order.create({
             "amount": int(data.amount * 100),
             "currency": "INR",
             "payment_capture": 1
         })
 
-        # Store pending record in DB
         payment = Payment(
-            user_id=current_user.id,
+            user_id=current_user["id"],
             plan_name=data.plan_name,
             amount=data.amount,
             order_id=order["id"],
@@ -55,6 +68,7 @@ async def create_order(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # -------------------------
