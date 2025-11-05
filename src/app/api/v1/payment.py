@@ -8,14 +8,15 @@ import razorpay, hmac, hashlib
 from ...core.db.database import async_get_db
 from ...models.payment import Payment
 from ..dependencies import get_current_user
+from ...core.config import settings
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
-RAZORPAY_KEY_ID = "rzp_test_Rbc8mXXdwuWUOS"
-RAZORPAY_KEY_SECRET = "rvsE94QNaiDh4ttPHtUuyb4y"
 
-razor_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-
+# Initialize Razorpay client using environment variables
+razor_client = razorpay.Client(
+    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+)
 
 # -------------------------
 # Create Order
@@ -46,7 +47,7 @@ async def create_order(
             await db.refresh(payment)
             return {"message": "Free plan activated successfully", "status": "free"}
 
-        # Otherwise, create Razorpay order
+        # Create Razorpay order
         order = razor_client.order.create({
             "amount": int(data.amount * 100),
             "currency": "INR",
@@ -64,11 +65,10 @@ async def create_order(
         await db.commit()
         await db.refresh(payment)
 
-        return {"order_id": order["id"], "key": RAZORPAY_KEY_ID}
+        return {"order_id": order["id"], "key": settings.RAZORPAY_KEY_ID} 
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 # -------------------------
@@ -89,10 +89,10 @@ async def verify_payment(
         # Generate signature
         payload = f"{data.razorpay_order_id}|{data.razorpay_payment_id}"
         generated_signature = hmac.new(
-            RAZORPAY_KEY_SECRET.encode(), payload.encode(), hashlib.sha256
+            settings.RAZORPAY_KEY_SECRET.encode(), payload.encode(), hashlib.sha256
         ).hexdigest()
 
-        # Get payment record
+        # Fetch payment record
         result = await db.execute(select(Payment).filter(Payment.order_id == data.razorpay_order_id))
         payment = result.scalars().first()
 

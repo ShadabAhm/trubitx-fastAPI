@@ -135,6 +135,10 @@ class SMTPSettings(BaseSettings):
     FROM_EMAIL: str = config("FROM_EMAIL", default=None)
     FRONTEND_URL: str = config("FRONTEND_URL", default="http://localhost:5173")
 
+class RozarpaySettings(BaseSettings):
+    RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID")
+    RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET")
+
 
 
 class Settings(
@@ -152,6 +156,7 @@ class Settings(
     CRUDAdminSettings,
     EnvironmentSettings,
     SMTPSettings,
+    RozarpaySettings,
 ):
     pass
 
