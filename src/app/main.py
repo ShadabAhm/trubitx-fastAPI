@@ -31,3 +31,8 @@ app = create_application(router=router, settings=settings, lifespan=lifespan_wit
 # Mount admin interface if enabled
 if admin:
     app.mount(settings.CRUD_ADMIN_MOUNT_PATH, admin.app)
+
+
+for route in app.routes:
+    print(route.path)
+

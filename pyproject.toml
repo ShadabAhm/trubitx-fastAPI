@@ -5,7 +5,7 @@ description = "A fully Async FastAPI boilerplate using SQLAlchemy and Pydantic 2
 authors = [{ name = "Igor Magalhaes", email = "igor.magalhaes.r@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
-requires-python = "~=3.11"
+requires-python = ">=3.11,<3.12"  
 dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic[email]>=2.6.1",
@@ -43,7 +43,16 @@ dependencies = [
     "trafilatura>=1.6.0",
     "weasyprint>=60.0",
     "apscheduler",
-    "razorpay"
+    "razorpay",
+    "llama-index>=0.10.0",
+    "llama-index-embeddings-openai>=0.1.0",
+    "llama-index-embeddings-huggingface>=0.1.0",
+    "llama-index-llms-openai>=0.1.0",
+    "llama-index-llms-anthropic>=0.1.0",
+    "sentence-transformers>=2.2.2",
+    "openai>=1.0.0",
+    "anthropic>=0.7.0",
+    "llama-index-llms-groq>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -99,8 +108,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
-    "F401", # unused import
-    "F403", # star imports
+    "F401", 
+    "F403", 
 ]
 
 [tool.ruff.lint.mccabe]

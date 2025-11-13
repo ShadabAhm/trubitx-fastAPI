@@ -10,6 +10,7 @@ from .users import router as users_router
 from .campaigns import router as campaigns_router
 from .forgot_password import router as forgot_password_router
 from .payment import router as payment_router
+from .chat import router as chat_router
 
 
 router = APIRouter(prefix="/v1")
@@ -23,4 +24,5 @@ router.include_router(rate_limits_router)
 router.include_router(forgot_password_router)
 router.include_router(campaigns_router)
 router.include_router(payment_router)
+router.include_router(chat_router)
 

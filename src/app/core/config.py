@@ -139,6 +139,12 @@ class RozarpaySettings(BaseSettings):
     RAZORPAY_KEY_ID: str = config("RAZORPAY_KEY_ID")
     RAZORPAY_KEY_SECRET: str = config("RAZORPAY_KEY_SECRET")
 
+class LLMSettings(BaseSettings):
+    LLM_PROVIDER: str = config("LLM_PROVIDER", default="openai")
+    LLM_MODEL: str = config("LLM_MODEL", default="gpt-4o-mini")
+    OPENAI_API_KEY: str | None = config("OPENAI_API_KEY", default=None)
+    GROQ_API_KEY: str | None = config("GROQ_API_KEY", default=None)
+
 
 
 class Settings(
@@ -157,6 +163,7 @@ class Settings(
     EnvironmentSettings,
     SMTPSettings,
     RozarpaySettings,
+    LLMSettings,
 ):
     pass
 
