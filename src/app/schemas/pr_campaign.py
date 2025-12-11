@@ -1,18 +1,36 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from uuid import UUID
 
 
 class CampaignBase(BaseModel):
-    name: str
-    brand_keyword: str
-    competitors: List[str]
-    regions: List[str]
+    name: str = Field(..., min_length=1, max_length=255)
+    brand_keyword: str = Field(..., min_length=1)
+    competitors: List[str] = Field(..., min_length=1)  # At least 1 competitor required
+    regions: List[str] = Field(..., min_length=1)  # At least 1 region required
     duration_days: int = Field(default=14, ge=1, le=30)
     form_data: Dict[str, Any] = Field(default_factory=dict)
     is_recurring: bool = False
     interval_hours: Optional[int] = Field(default=None, ge=1, le=168)  # 1 hour to 7 days
+
+    @field_validator('competitors', 'regions')
+    @classmethod
+    def validate_non_empty_strings(cls, v: List[str]) -> List[str]:
+        """Ensure list items are non-empty strings"""
+        if not v:
+            raise ValueError('List cannot be empty')
+        cleaned = [item.strip() for item in v if item and item.strip()]
+        if not cleaned:
+            raise ValueError('List must contain at least one non-empty value')
+        return cleaned
+
+    @field_validator('brand_keyword')
+    @classmethod
+    def validate_brand_keyword(cls, v: str) -> str:
+        """Ensure brand keyword is not empty"""
+        if not v or not v.strip():
+            raise ValueError('Brand keyword cannot be empty')
+        return v.strip()
 
 
 class CampaignCreate(CampaignBase):
@@ -42,6 +60,8 @@ class CampaignRead(CampaignBase):
     completed_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -55,7 +75,7 @@ class CampaignJobBase(BaseModel):
 
 
 class CampaignJobRead(CampaignJobBase):
-    id: UUID
+    id: str  # UUID stored as string in database
     campaign_id: int
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

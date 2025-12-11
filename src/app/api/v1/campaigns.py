@@ -1,11 +1,12 @@
 from typing import Annotated, Any, List
-import asyncio
+import logging
 from datetime import datetime, UTC, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import Response
 from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from ..dependencies import get_current_user, get_current_superuser
 from ...core.db.database import async_get_db
@@ -20,7 +21,23 @@ from ...services.pr_kpi_service import PRKPIService
 from ...services.subscription_service import SubscriptionService
 from ...services.report_service import ReportService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["campaigns"])
+
+
+@router.get("/campaign/limits", response_model=CampaignLimitsResponse)
+async def get_campaign_limits(
+    db: Annotated[AsyncSession, Depends(async_get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)]
+) -> CampaignLimitsResponse:
+    """
+    Get user's campaign limits based on their tier.
+    Note: This route MUST be defined before /campaign/{campaign_id} to avoid path conflicts.
+    """
+    subscription_service = SubscriptionService(db)
+    limits = await subscription_service.get_user_limits(current_user["id"])
+    return CampaignLimitsResponse(**limits)
 
 
 @router.post("/campaign", status_code=201)
@@ -33,33 +50,31 @@ async def create_campaign(
     """
     Create a new PR campaign and start background processing
     """
-    # Validate tier limits
     subscription_service = SubscriptionService(db)
-    
-    # Check if user can create campaign
-    if not await subscription_service.can_create_campaign(current_user["id"]):
-        limits = await subscription_service.get_user_limits(current_user["id"])
-        raise HTTPException(
-            status_code=400,
-            detail=f"Campaign limit reached. Your {limits['tier_name']} plan allows {limits['max_campaigns']} campaigns. You've used {limits['campaigns_created']}."
-        )
-    
-    # Validate campaign parameters against tier limits
+
+    # Single validation call that checks all tier limits (removed duplicate can_create_campaign check)
     campaign_data = campaign.model_dump()
     await subscription_service.validate_campaign_creation(current_user["id"], campaign_data)
-    
-    # Create campaign
-    created_campaign = await crud_campaign.create(db=db, user_id=current_user["id"], campaign_in=campaign)
-    
-    # Create campaign job
-    await crud_campaign_job.create(db=db, campaign_id=created_campaign.id)
-    
-    # Increment campaign count
-    await subscription_service.increment_campaign_count(current_user["id"])
-    
-    # Start background processing
+
+    # Use a savepoint for transaction safety
+    try:
+        # Create campaign
+        created_campaign = await crud_campaign.create(db=db, user_id=current_user["id"], campaign_in=campaign)
+
+        # Create campaign job
+        await crud_campaign_job.create(db=db, campaign_id=created_campaign.id)
+
+        # Increment campaign count
+        await subscription_service.increment_campaign_count(current_user["id"])
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create campaign: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create campaign. Please try again.")
+
+    # Start background processing (outside transaction)
     background_tasks.add_task(execute_campaign_background, created_campaign.id)
-    
+
     return CampaignRead.model_validate(created_campaign)
 
 
@@ -283,33 +298,20 @@ async def delete_campaign(
     current_user: Annotated[dict, Depends(get_current_user)]
 ) -> dict[str, str]:
     """
-    Soft delete a campaign
+    Soft delete a campaign (sets is_deleted=True instead of removing from database)
     """
     campaign = await crud_campaign.get_by_id(db=db, campaign_id=campaign_id)
     if campaign is None:
         raise NotFoundException("Campaign not found")
-    
+
     if campaign.user_id != current_user["id"] and not current_user.get("is_superuser"):
         raise ForbiddenException("Not authorized to access this campaign")
-    
-    success = await crud_campaign.delete(db=db, campaign_id=campaign_id)
+
+    success = await crud_campaign.soft_delete(db=db, campaign_id=campaign_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete campaign")
-    
+
     return {"message": "Campaign deleted successfully"}
-
-
-@router.get("/campaign/limits", response_model=CampaignLimitsResponse)
-async def get_campaign_limits(
-    db: Annotated[AsyncSession, Depends(async_get_db)],
-    current_user: Annotated[dict, Depends(get_current_user)]
-) -> CampaignLimitsResponse:
-    """
-    Get user's campaign limits based on their tier
-    """
-    subscription_service = SubscriptionService(db)
-    limits = await subscription_service.get_user_limits(current_user["id"])
-    return CampaignLimitsResponse(**limits)
 
 
 @router.post("/campaign/{campaign_id}/toggle-recurring")
@@ -464,28 +466,76 @@ async def download_campaign_report(
 # ========== BACKGROUND TASK FUNCTIONS ==========
 
 async def execute_campaign_background(campaign_id: int):
-    """Background task to execute campaign processing"""
-    from ...core.db.database import async_get_db
-    async for session in async_get_db():
+    """Background task to execute campaign processing with proper error handling"""
+    from ...core.db.database import async_session_factory
+
+    async with async_session_factory() as session:
         try:
+            # Update job status to in_progress
+            await crud_campaign_job.update_status(db=session, campaign_id=campaign_id, status='in_progress')
+
             service = PRKPIService(session, campaign_id)
             await service.execute_campaign()
+
+            # Job status is already updated to 'completed' by the service
+            # Campaign status is also updated by the service:
+            # - 'active' for recurring campaigns
+            # - 'completed' for non-recurring campaigns
+            # No need to update status here as the service handles it correctly
+
         except Exception as e:
-            print(f"Background campaign execution failed: {e}")
-        break
+            logger.error(f"Background campaign execution failed for campaign {campaign_id}: {e}", exc_info=True)
+            # Update campaign and job status to failed
+            try:
+                await crud_campaign_job.update_status(
+                    db=session,
+                    campaign_id=campaign_id,
+                    status='failed',
+                    error_log=str(e)
+                )
+                await crud_campaign.update(
+                    db=session,
+                    campaign_id=campaign_id,
+                    campaign_in=CampaignUpdate(status='failed', error_message=str(e))
+                )
+            except Exception as update_error:
+                logger.error(f"Failed to update campaign status after error: {update_error}")
 
 
 async def resume_campaign_background(campaign_id: int):
-    """Background task to resume campaign processing"""
-    from ...core.db.database import async_get_db
-    async for session in async_get_db():
+    """Background task to resume campaign processing with proper error handling"""
+    from ...core.db.database import async_session_factory
+
+    async with async_session_factory() as session:
         try:
+            # Update job status to in_progress
+            await crud_campaign_job.update_status(db=session, campaign_id=campaign_id, status='in_progress')
+
             service = PRKPIService(session, campaign_id)
-            # You might want to implement resume logic in the service
-            await service.execute_campaign()  # For now, restart the campaign
+            await service.execute_campaign()
+
+            # Job status is already updated to 'completed' by the service
+            # Campaign status is also updated by the service:
+            # - 'active' for recurring campaigns
+            # - 'completed' for non-recurring campaigns
+            # No need to update status here as the service handles it correctly
+
         except Exception as e:
-            print(f"Background campaign resumption failed: {e}")
-        break
+            logger.error(f"Background campaign resumption failed for campaign {campaign_id}: {e}", exc_info=True)
+            try:
+                await crud_campaign_job.update_status(
+                    db=session,
+                    campaign_id=campaign_id,
+                    status='failed',
+                    error_log=str(e)
+                )
+                await crud_campaign.update(
+                    db=session,
+                    campaign_id=campaign_id,
+                    campaign_in=CampaignUpdate(status='failed', error_message=str(e))
+                )
+            except Exception as update_error:
+                logger.error(f"Failed to update campaign status after error: {update_error}")
 
 
 # ========== HELPER FUNCTIONS ==========

@@ -3,6 +3,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, Request
 from fastcrud.paginated import PaginatedListResponse, compute_offset, paginated_response
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from ...api.dependencies import get_current_superuser, get_current_user
 from ...core.db.database import async_get_db
@@ -11,10 +12,22 @@ from ...core.security import blacklist_token, get_password_hash, oauth2_scheme
 from ...crud.crud_rate_limit import crud_rate_limits
 from ...crud.crud_tier import crud_tiers
 from ...crud.crud_users import crud_users
+from ...models.tier import Tier
 from ...schemas.tier import TierRead
 from ...schemas.user import UserCreate, UserCreateInternal, UserRead, UserTierUpdate, UserUpdate
 
 router = APIRouter(tags=["users"])
+
+
+async def get_tier_info(db: AsyncSession, tier_id: int | None) -> dict:
+    """Helper function to get tier name and duration by id"""
+    if tier_id is None:
+        return {"tier_name": None, "tier_duration": None}
+    result = await db.execute(select(Tier.name, Tier.duration).where(Tier.id == tier_id))
+    tier = result.first()
+    if tier:
+        return {"tier_name": tier[0], "tier_duration": tier[1]}
+    return {"tier_name": None, "tier_duration": None}
 
 
 @router.post("/user", response_model=UserRead, status_code=201)
@@ -54,22 +67,43 @@ async def read_users(
         is_deleted=False,
     )
 
+    # Add tier_name and tier_duration to each user
+    enhanced_users = []
+    for user in users_data["data"]:
+        user_dict = user if isinstance(user, dict) else user.model_dump()
+        tier_info = await get_tier_info(db, user_dict.get("tier_id"))
+        user_dict.update(tier_info)
+        enhanced_users.append(user_dict)
+
+    users_data["data"] = enhanced_users
     response: dict[str, Any] = paginated_response(crud_data=users_data, page=page, items_per_page=items_per_page)
     return response
 
 
 @router.get("/user/me/", response_model=UserRead)
-async def read_users_me(request: Request, current_user: Annotated[dict, Depends(get_current_user)]) -> dict:
+async def read_users_me(
+    request: Request,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(async_get_db)]
+) -> dict:
+    # Add tier_name and tier_duration to response
+    tier_info = await get_tier_info(db, current_user.get("tier_id"))
+    current_user.update(tier_info)
     return current_user
 
 
 @router.get("/user/{username}", response_model=UserRead)
-async def read_user(request: Request, username: str, db: Annotated[AsyncSession, Depends(async_get_db)]) -> UserRead:
+async def read_user(request: Request, username: str, db: Annotated[AsyncSession, Depends(async_get_db)]) -> dict:
     db_user = await crud_users.get(db=db, username=username, is_deleted=False, schema_to_select=UserRead)
     if db_user is None:
         raise NotFoundException("User not found")
 
-    return cast(UserRead, db_user)
+    db_user = cast(UserRead, db_user)
+    user_dict = db_user.model_dump()
+    # Add tier_name and tier_duration to response
+    tier_info = await get_tier_info(db, db_user.tier_id)
+    user_dict.update(tier_info)
+    return user_dict
 
 
 

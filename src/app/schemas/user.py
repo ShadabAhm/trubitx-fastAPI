@@ -32,6 +32,8 @@ class UserRead(BaseModel):
     profile_image_url: str
     role: str
     tier_id: Optional[int] = None
+    tier_name: Optional[str] = None  # Tier name for display
+    tier_duration: Optional[str] = None  # Tier duration for display
 
 
 # ✅ Used during registration

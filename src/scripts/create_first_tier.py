@@ -21,14 +21,14 @@ async def create_first_tier(session: AsyncSession) -> None:
                 "description": "Free basic plan to explore features",
                 "sub_description": "Perfect for getting started.",
                 "features": [
-                    "1 campaign",
+                    "10 campaigns",
                     "Daily Batch Update",
                     "Basic Reporting"
                 ],
                 "button_text": "Start Free Trial",
                 "badge": "Free",
                 # PR Campaign Limits
-                "max_campaigns": 1,
+                "max_campaigns": 10,
                 "max_competitors": 1,
                 "max_duration_days": 7,
                 "max_articles_per_campaign": 50

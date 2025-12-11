@@ -1,7 +1,7 @@
 from llama_index.core import VectorStoreIndex, Document, Settings
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding  # Add this import
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding 
 from llama_index.llms.openai import OpenAI
-from llama_index.llms.groq import Groq  # Make sure this is imported
+from llama_index.llms.groq import Groq  
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 
@@ -39,7 +39,7 @@ class LLMCampaignService:
 
             Settings.llm = self.llm
             Settings.embed_model = self.embed_model
-            print(f"✅ LLM initialized: {provider} ({model_name})")
+            print(f"LLM initialized: {provider} ({model_name})")
 
         except Exception as e:
-            print(f"❌ LLM initialization failed: {e}")
+            print(f"LLM initialization failed: {e}")

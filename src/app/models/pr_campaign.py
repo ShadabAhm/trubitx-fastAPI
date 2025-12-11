@@ -19,13 +19,17 @@ class Campaign(Base):
     competitors: Mapped[list] = mapped_column(JSON)
     regions: Mapped[list] = mapped_column(JSON)
     duration_days: Mapped[int] = mapped_column(Integer, default=14)
-    status: Mapped[str] = mapped_column(String(20), default='ingesting')
+    status: Mapped[str] = mapped_column(String(20), default='ingesting', index=True)  # Added index for status queries
     current_step: Mapped[int] = mapped_column(Integer, default=1)
     form_data: Mapped[dict] = mapped_column(JSON, default=dict)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Soft delete field
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Recurring campaign fields
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)

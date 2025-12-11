@@ -2,18 +2,18 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException
 from datetime import UTC, datetime
 
 from ..models.pr_campaign import Campaign, CampaignJob, Article, BrandKPI, PublicationKPI, GenericKeywordAnalysis
 from ..schemas.pr_campaign import CampaignCreate, CampaignUpdate
+from ..core.exceptions.http_exceptions import NotFoundException
 
 
 class CRUDCampaign:
     async def create(
-        self, 
-        db: AsyncSession, 
-        user_id: int, 
+        self,
+        db: AsyncSession,
+        user_id: int,
         campaign_in: CampaignCreate
     ) -> Campaign:
         campaign_data = campaign_in.model_dump()
@@ -24,10 +24,12 @@ class CRUDCampaign:
         return campaign
 
     async def get_by_id(self, db: AsyncSession, campaign_id: int) -> Optional[Campaign]:
+        """Get campaign by ID (excludes soft-deleted campaigns)"""
         result = await db.execute(
             select(Campaign)
             .options(selectinload(Campaign.job))
             .where(Campaign.id == campaign_id)
+            .where(Campaign.is_deleted == False)
         )
         return result.scalar_one_or_none()
 
@@ -36,22 +38,31 @@ class CRUDCampaign:
         db: AsyncSession,
         user_id: int,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        include_deleted: bool = False
     ) -> List[Campaign]:
-        result = await db.execute(
+        """Get user's campaigns (excludes soft-deleted by default)"""
+        query = (
             select(Campaign)
             .options(selectinload(Campaign.job))
             .where(Campaign.user_id == user_id)
-            .offset(skip)
+        )
+        if not include_deleted:
+            query = query.where(Campaign.is_deleted == False)
+
+        result = await db.execute(
+            query.offset(skip)
             .limit(limit)
             .order_by(Campaign.created_at.desc())
         )
         return result.scalars().all()
 
-    async def count_user_campaigns(self, db: AsyncSession, user_id: int) -> int:
-        result = await db.execute(
-            select(func.count(Campaign.id)).where(Campaign.user_id == user_id)
-        )
+    async def count_user_campaigns(self, db: AsyncSession, user_id: int, include_deleted: bool = False) -> int:
+        """Count user's campaigns (excludes soft-deleted by default)"""
+        query = select(func.count(Campaign.id)).where(Campaign.user_id == user_id)
+        if not include_deleted:
+            query = query.where(Campaign.is_deleted == False)
+        result = await db.execute(query)
         return result.scalar_one()
 
     async def update(
@@ -65,29 +76,55 @@ class CRUDCampaign:
             await db.execute(
                 update(Campaign)
                 .where(Campaign.id == campaign_id)
+                .where(Campaign.is_deleted == False)
                 .values(**update_data, updated_at=datetime.now(UTC))
             )
             await db.commit()
 
         campaign = await self.get_by_id(db, campaign_id)
         if not campaign:
-            raise HTTPException(status_code=404, detail="Campaign not found")
+            raise NotFoundException("Campaign not found")
         return campaign
 
-    async def delete(self, db: AsyncSession, campaign_id: int) -> bool:
+    async def soft_delete(self, db: AsyncSession, campaign_id: int) -> bool:
+        """Soft delete a campaign by setting is_deleted=True"""
+        result = await db.execute(
+            update(Campaign)
+            .where(Campaign.id == campaign_id)
+            .where(Campaign.is_deleted == False)
+            .values(
+                is_deleted=True,
+                deleted_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC)
+            )
+        )
+        await db.commit()
+        return result.rowcount > 0
+
+    async def hard_delete(self, db: AsyncSession, campaign_id: int) -> bool:
+        """Permanently delete a campaign and all related records (use with caution)"""
         # Delete related records first (cascade delete)
-        # Delete articles
         await db.execute(delete(Article).where(Article.campaign_id == campaign_id))
-        # Delete brand KPIs
         await db.execute(delete(BrandKPI).where(BrandKPI.campaign_id == campaign_id))
-        # Delete publication KPIs
         await db.execute(delete(PublicationKPI).where(PublicationKPI.campaign_id == campaign_id))
-        # Delete generic keyword analyses
         await db.execute(delete(GenericKeywordAnalysis).where(GenericKeywordAnalysis.campaign_id == campaign_id))
-        # Delete campaign job
         await db.execute(delete(CampaignJob).where(CampaignJob.campaign_id == campaign_id))
-        # Finally delete the campaign
         result = await db.execute(delete(Campaign).where(Campaign.id == campaign_id))
+        await db.commit()
+        return result.rowcount > 0
+
+    async def restore(self, db: AsyncSession, campaign_id: int) -> bool:
+        """Restore a soft-deleted campaign"""
+        result = await db.execute(
+            update(Campaign)
+            .where(Campaign.id == campaign_id)
+            .where(Campaign.is_deleted == True)
+            .values(
+                is_deleted=False,
+                deleted_at=None,
+                updated_at=datetime.now(UTC)
+            )
+        )
         await db.commit()
         return result.rowcount > 0
 
@@ -124,7 +161,7 @@ class CRUDCampaignJob:
 
         job = await self.get_by_campaign_id(db, campaign_id)
         if not job:
-            raise HTTPException(status_code=404, detail="Campaign job not found")
+            raise NotFoundException("Campaign job not found")
         return job
 
     async def update_status(
@@ -151,7 +188,7 @@ class CRUDCampaignJob:
 
         job = await self.get_by_campaign_id(db, campaign_id)
         if not job:
-            raise HTTPException(status_code=404, detail="Campaign job not found")
+            raise NotFoundException("Campaign job not found")
         return job
 
 
